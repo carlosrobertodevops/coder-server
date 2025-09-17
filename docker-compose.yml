@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: coder
+      POSTGRES_USER: coder
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  coder:
+    image: ghcr.io/coder/coder:latest
+    environment:
+      CODER_ACCESS_URL: ${CODER_ACCESS_URL}
+      CODER_PG_CONNECTION_URL: postgresql://coder:${POSTGRES_PASSWORD}@db:5432/coder?sslmode=disable
+      CODER_HTTP_ADDRESS: 0.0.0.0:7080
+      CODER_TELEMETRY: ${CODER_TELEMETRY:-false}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - coder_data:/home/coder/.config
+    group_add:
+      - "${DOCKER_GID}"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  db_data:
+  coder_data:
