@@ -8,27 +8,51 @@ terraform {
 provider "coder" {}
 provider "docker" {}
 
+# ====== VARIÁVEL: GID do grupo docker no HOST ======
+variable "docker_gid" {
+  type    = string
+  default = "988"  # SUBSTITUA/ sobrescreva ao criar workspace
+}
+
+# ====== CONTEXTO ======
 data "coder_workspace"       "me" {}
 data "coder_workspace_owner" "me" {}
 data "coder_provisioner"     "me" {}
 
 locals { username = data.coder_workspace_owner.me.name }
 
+# ====== AGENT ======
 resource "coder_agent" "main" {
   arch = data.coder_provisioner.me.arch
   os   = "linux"
 
-  # Instala e inicia o code-server (VS Code web) + Claude Code
   startup_script = <<-EOT
     set -euo pipefail
 
-    # Instalar code-server (modo standalone)
-    curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone --prefix=/tmp/code-server
+    # --- alinhar grupo 'docker' ao GID do host para acessar o socket ---
+    if [ -n "${DOCKER_GID:-}" ]; then
+      if ! getent group docker >/dev/null; then
+        sudo groupadd -g "$DOCKER_GID" docker || true
+      fi
+      sudo usermod -aG docker "$(whoami)" || true
+    fi
 
-    # Instalar extensões no code-server (Claude Code)
+    # --- Docker CLI + Compose plugin no workspace ---
+    if ! command -v docker >/dev/null; then
+      sudo apt-get update
+      sudo apt-get install -y ca-certificates curl gnupg
+      sudo install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+      sudo apt-get update
+      sudo apt-get install -y docker-ce-cli docker-compose-plugin
+    fi
+
+    # --- code-server + Claude Code (IDE web) ---
+    curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone --prefix=/tmp/code-server
     /tmp/code-server/bin/code-server --install-extension anthropic.claude-copilot || true
 
-    # Iniciar code-server (sem auth; o acesso é protegido pelo Coder)
+    # iniciar code-server (auth via Coder)
     /tmp/code-server/bin/code-server \
       --auth none \
       --port 13337 \
@@ -53,7 +77,6 @@ resource "coder_agent" "main" {
     interval     = 10
     timeout      = 1
   }
-
   metadata {
     display_name = "RAM"
     key          = "1_ram"
@@ -63,11 +86,13 @@ resource "coder_agent" "main" {
   }
 }
 
+# ====== PERSISTÊNCIA ======
 resource "docker_volume" "home" {
-  name = "coder-${data.coder_workspace.me.id}-home"
+  name      = "coder-${data.coder_workspace.me.id}-home"
   lifecycle { ignore_changes = all }
 }
 
+# ====== IMAGEM ======
 resource "docker_image" "img" {
   name = "coder-${data.coder_workspace.me.id}"
   build {
@@ -79,26 +104,39 @@ resource "docker_image" "img" {
   }
 }
 
+# ====== CONTAINER DO WORKSPACE ======
 resource "docker_container" "ws" {
   count    = data.coder_workspace.me.start_count
   image    = docker_image.img.name
   name     = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
   hostname = data.coder_workspace.me.name
 
-  # Garante que o agent respeite a access_url pública (evita 'localhost' hardcoded)
   entrypoint = ["sh", "-c", replace(coder_agent.main.init_script, "/localhost|127\\.0\\.0\\.1/", "host.docker.internal")]
-  env        = ["CODER_AGENT_TOKEN=${coder_agent.main.token}"]
 
-  # Resolve host.docker.internal para host-gateway (Docker 20.10+)
+  env = [
+    "CODER_AGENT_TOKEN=${coder_agent.main.token}",
+    "DOCKER_GID=${var.docker_gid}"
+  ]
+
+  # faz host.docker.internal funcionar em Linux
   host { host = "host.docker.internal" ip = "host-gateway" }
 
+  # HOME persistente
   volumes {
     container_path = "/home/${local.username}"
     volume_name    = docker_volume.home.name
     read_only      = false
   }
+
+  # socket do Docker do HOST (para usar docker compose no workspace)
+  volumes {
+    host_path      = "/var/run/docker.sock"
+    container_path = "/var/run/docker.sock"
+    read_only      = false
+  }
 }
 
+# ====== APP code-server ======
 resource "coder_app" "code" {
   agent_id     = coder_agent.main.id
   slug         = "code-server"
