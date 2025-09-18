@@ -1,3 +1,4 @@
+cat > main.tf <<'HCL'
 terraform {
   required_providers {
     coder  = { source = "coder/coder" }
@@ -12,13 +13,13 @@ provider "docker" {}
 # Pegue na VPS: getent group docker | cut -d: -f3
 variable "docker_gid" {
   type    = string
-  default = "999" # TROQUE pelo seu GID do host, ou sobrescreva ao criar o workspace
+  default = "999"  # TROQUE pelo seu GID do host, ou sobrescreva ao criar o workspace
 }
 
 # ====== CONTEXTO ======
-data "coder_workspace" "me" {}
+data "coder_workspace"       "me" {}
 data "coder_workspace_owner" "me" {}
-data "coder_provisioner" "me" {}
+data "coder_provisioner"     "me" {}
 
 locals {
   username = data.coder_workspace_owner.me.name
@@ -93,7 +94,6 @@ resource "coder_agent" "main" {
     interval     = 10
     timeout      = 1
   }
-
   metadata {
     display_name = "RAM"
     key          = "1_ram"
@@ -105,22 +105,17 @@ resource "coder_agent" "main" {
 
 # ====== PERSISTÊNCIA ======
 resource "docker_volume" "home" {
-  name = "coder-${data.coder_workspace.me.id}-home"
-
-  lifecycle {
-    ignore_changes = all
-  }
+  name      = "coder-${data.coder_workspace.me.id}-home"
+  lifecycle { ignore_changes = all }
 }
 
 # ====== IMAGEM (build do Dockerfile) ======
 resource "docker_image" "img" {
   name = "coder-${data.coder_workspace.me.id}"
-
   build {
     context    = "./build"
     build_args = { USER = local.username }
   }
-
   triggers = {
     dir_sha1 = sha1(join("", [for f in fileset(path.module, "build/*") : filesha1(f)]))
   }
@@ -178,3 +173,4 @@ resource "coder_app" "code" {
     threshold = 6
   }
 }
+HCL

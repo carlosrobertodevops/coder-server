@@ -5,19 +5,29 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Pacotes base + libs de build + fontes (inclui Fira Code)
 RUN apt-get update && apt-get install -y \
-    sudo curl git zsh ca-certificates gnupg build-essential \
-    openssh-client locales bash-completion unzip \
-    libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
-    libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
-    libffi-dev liblzma-dev fonts-powerline fonts-firacode \
+  sudo curl git zsh ca-certificates gnupg build-essential \
+  openssh-client locales bash-completion unzip \
+  libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+  libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+  libffi-dev liblzma-dev fonts-powerline fonts-firacode \
   && rm -rf /var/lib/apt/lists/*
 
 # Locales (pt_BR opcional)
 RUN sed -i 's/^# \(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
- && sed -i 's/^# \(pt_BR.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
- && locale-gen
+  && sed -i 's/^# \(pt_BR.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
+  && locale-gen
 ENV LANG=pt_BR.UTF-8
 ENV LC_ALL=pt_BR.UTF-8
+
+# --- GitHub CLI (gh) ---
+RUN mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null \
+  && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | tee /etc/apt/sources.list.d/github-cli.list >/dev/null \
+  && apt-get update && apt-get install -y gh \
+  && rm -rf /var/lib/apt/lists/*
 
 # Usuário com sudo NOPASSWD
 RUN useradd --groups sudo --create-home --shell /bin/bash ${USER} \
@@ -42,28 +52,70 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
 # Shell default zsh
 RUN sudo chsh -s "$(which zsh)" ${USER}
 
-# .zshrc amigável ao VS Code (code-server) e com Starship/oh-my-zsh
+# .zshrc compatível com VS Code (code-server) + Starship/oh-my-zsh + gh completion
 RUN bash -lc 'cat > ~/.zshrc << "EOF"\n\
-# VS Code shell integration\n\
-if [ -n "$VSCODE_SHELL_INTEGRATION" ] && [ -r "$VSCODE_SHELL_INTEGRATION" ]; then . "$VSCODE_SHELL_INTEGRATION"; fi\n\
-\n\
-export PATH=\"$HOME/.local/bin:$PATH\"\n\
-# NVM\n\
-export NVM_DIR=\"$HOME/.nvm\"\n\
-[ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"\n\
-# oh-my-zsh\n\
-export ZSH=\"$HOME/.oh-my-zsh\"\n\
-ZSH_THEME=\"robbyrussell\"\n\
-plugins=(git)\n\
-[ -d \"$ZSH\" ] && . \"$ZSH/oh-my-zsh.sh\"\n\
-# starship\n\
-command -v starship >/dev/null 2>&1 && eval \"$(starship init zsh)\"\n\
-# qualidade de vida\n\
-alias ll=\"ls -alF\"\n\
-EOF'
+  # VS Code shell integration\n\
+  if [ -n "$VSCODE_SHELL_INTEGRATION" ] && [ -r "$VSCODE_SHELL_INTEGRATION" ]; then . "$VSCODE_SHELL_INTEGRATION"; fi\n\
+  \n\
+  export PATH=\"$HOME/.local/bin:$PATH\"\n\
+  # NVM\n\
+  export NVM_DIR=\"$HOME/.nvm\"\n\
+  [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"\n\
+  # oh-my-zsh\n\
+  export ZSH=\"$HOME/.oh-my-zsh\"\n\
+  ZSH_THEME=\"robbyrussell\"\n\
+  plugins=(git)\n\
+  [ -d \"$ZSH\" ] && . \"$ZSH/oh-my-zsh.sh\"\n\
+  # GitHub CLI completion\n\
+  command -v gh >/dev/null 2>&1 && eval \"$(gh completion -s zsh)\"\n\
+  # Starship prompt\n\
+  command -v starship >/dev/null 2>&1 && eval \"$(starship init zsh)\"\n\
+  # qualidade de vida\n\
+  alias ll=\"ls -alF\"\n\
+  EOF'
 
-# .bashrc (caso use bash)
+# .bashrc (caso use bash) + gh completion + Starship
 RUN echo 'export NVM_DIR="$HOME/.nvm"' >> ~/.bashrc \
- && echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' >> ~/.bashrc \
- && echo 'eval "$(starship init bash)"' >> ~/.bashrc \
- && echo 'alias ll="ls -alF"' >> ~/.bashrc
+  && echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' >> ~/.bashrc \
+  && echo 'command -v gh >/dev/null 2>&1 && eval "$(gh completion -s bash)"' >> ~/.bashrc \
+  && echo 'eval "$(starship init bash)"' >> ~/.bashrc \
+  && echo 'alias ll="ls -alF"' >> ~/.bashrc
+
+# --- Config padrão do Starship (preset "minimal", bom para iPad) ---
+RUN mkdir -p /home/${USER}/.config \
+  && cat > /home/${USER}/.config/starship.toml << "EOF"\n\
+  # Starship preset minimal — sem ícones Nerd Font (amigável ao iPad)\n\
+  add_newline = true\n\
+  format = \"$all$character\"\n\
+  [character]\n\
+  success_symbol = \"❯\"\n\
+  error_symbol = \"❯\"\n\
+  vimcmd_symbol = \"❮\"\n\
+  [git_branch]\n\
+  format = \" on [$branch]\"\n\
+  symbol = \"\"\n\
+  [git_status]\n\
+  format = \" ([\\"]$all_status$ahead_behind)\")\n\
+  style = \"bold\"\n\
+  conflicted = \"C\"\n\
+  ahead = \"A${count}\"\n\
+  behind = \"B${count}\"\n\
+  stashed = \"S${count}\"\n\
+  modified = \"M${count}\"\n\
+  staged = \"+${count}\"\n\
+  renamed = \"R${count}\"\n\
+  deleted = \"D${count}\"\n\
+  untracked = \"U${count}\"\n\
+  [package]\n\
+  disabled = false\n\
+  format = \" via $version\"\n\
+  [nodejs]\n\
+  format = \" via node $version\"\n\
+  symbol = \"\"\n\
+  [python]\n\
+  format = \" via py $version\"\n\
+  symbol = \"\"\n\
+  [time]\n\
+  disabled = true\n\
+  EOF\n\
+  && chown -R ${USER}:${USER} /home/${USER}/.config
