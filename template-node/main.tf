@@ -9,9 +9,10 @@ provider "coder" {}
 provider "docker" {}
 
 # ====== VARIÁVEL: GID do grupo docker no HOST ======
+# Pegue na VPS: getent group docker | cut -d: -f3
 variable "docker_gid" {
   type    = string
-  default = "988"  # SUBSTITUA/ sobrescreva ao criar workspace
+  default = "999"  # TROQUE pelo seu GID do host, ou sobrescreva ao criar o workspace
 }
 
 # ====== CONTEXTO ======
@@ -29,10 +30,10 @@ resource "coder_agent" "main" {
   startup_script = <<-EOT
     set -euo pipefail
 
-    # --- alinhar grupo 'docker' ao GID do host para acessar o socket ---
-    if [ -n "${DOCKER_GID:-}" ]; then
+    # --- Alinhar grupo 'docker' com o GID do host (para acessar /var/run/docker.sock) ---
+    if [ -n "$${DOCKER_GID:-}" ]; then
       if ! getent group docker >/dev/null; then
-        sudo groupadd -g "$DOCKER_GID" docker || true
+        sudo groupadd -g "$${DOCKER_GID}" docker || true
       fi
       sudo usermod -aG docker "$(whoami)" || true
     fi
@@ -52,7 +53,7 @@ resource "coder_agent" "main" {
     curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone --prefix=/tmp/code-server
     /tmp/code-server/bin/code-server --install-extension anthropic.claude-copilot || true
 
-    # iniciar code-server (auth via Coder)
+    # Iniciar code-server (auth via Coder)
     /tmp/code-server/bin/code-server \
       --auth none \
       --port 13337 \
@@ -61,6 +62,19 @@ resource "coder_agent" "main" {
       --extensions-dir /home/${local.username}/.local/share/code-server/extensions \
       /home/${local.username} \
       >/tmp/code-server.log 2>&1 &
+
+    # === VS Code settings: Fira Code + ligaduras ===
+    SETTINGS_DIR="/home/${local.username}/.local/share/code-server/User"
+    mkdir -p "$SETTINGS_DIR"
+    cat > "$SETTINGS_DIR/settings.json" <<JSON
+    {
+      "editor.fontFamily": "'Fira Code', Menlo, Monaco, 'Courier New', monospace",
+      "editor.fontLigatures": true,
+      "terminal.integrated.fontFamily": "Fira Code",
+      "terminal.integrated.minimumContrastRatio": 4.5
+    }
+    JSON
+    chown -R ${local.username}:${local.username} "$SETTINGS_DIR"
   EOT
 
   env = {
@@ -70,6 +84,7 @@ resource "coder_agent" "main" {
     GIT_COMMITTER_EMAIL = data.coder_workspace_owner.me.email
   }
 
+  # Widgets (opcional)
   metadata {
     display_name = "CPU"
     key          = "0_cpu"
@@ -92,7 +107,7 @@ resource "docker_volume" "home" {
   lifecycle { ignore_changes = all }
 }
 
-# ====== IMAGEM ======
+# ====== IMAGEM (build do Dockerfile) ======
 resource "docker_image" "img" {
   name = "coder-${data.coder_workspace.me.id}"
   build {
@@ -111,15 +126,22 @@ resource "docker_container" "ws" {
   name     = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
   hostname = data.coder_workspace.me.name
 
-  entrypoint = ["sh", "-c", replace(coder_agent.main.init_script, "/localhost|127\\.0\\.0\\.1/", "host.docker.internal")]
+  # Corrigido: usar regexreplace (não replace) para regex
+  entrypoint = [
+    "sh", "-c",
+    regexreplace(coder_agent.main.init_script, "(localhost|127\\.0\\.0\\.1)", "host.docker.internal")
+  ]
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
     "DOCKER_GID=${var.docker_gid}"
   ]
 
-  # faz host.docker.internal funcionar em Linux
-  host { host = "host.docker.internal" ip = "host-gateway" }
+  # Corrigido: bloco 'host' em múltiplas linhas
+  host {
+    host = "host.docker.internal"
+    ip   = "host-gateway"
+  }
 
   # HOME persistente
   volumes {
@@ -128,7 +150,7 @@ resource "docker_container" "ws" {
     read_only      = false
   }
 
-  # socket do Docker do HOST (para usar docker compose no workspace)
+  # Monta o socket do Docker do HOST (para usar docker compose)
   volumes {
     host_path      = "/var/run/docker.sock"
     container_path = "/var/run/docker.sock"
@@ -136,7 +158,7 @@ resource "docker_container" "ws" {
   }
 }
 
-# ====== APP code-server ======
+# ====== APP code-server (botão no dashboard) ======
 resource "coder_app" "code" {
   agent_id     = coder_agent.main.id
   slug         = "code-server"

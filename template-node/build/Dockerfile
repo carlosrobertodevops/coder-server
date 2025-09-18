@@ -3,14 +3,13 @@ FROM ubuntu:22.04
 ARG USER=coder
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Pacotes base
+# Pacotes base + libs de build + fontes (inclui Fira Code)
 RUN apt-get update && apt-get install -y \
     sudo curl git zsh ca-certificates gnupg build-essential \
     openssh-client locales bash-completion unzip \
     libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
     libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
-    libffi-dev liblzma-dev fonts-powerline \
-    fonts-firacode\
+    libffi-dev liblzma-dev fonts-powerline fonts-firacode \
   && rm -rf /var/lib/apt/lists/*
 
 # Locales (pt_BR opcional)
@@ -43,23 +42,24 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
 # Shell default zsh
 RUN sudo chsh -s "$(which zsh)" ${USER}
 
-# .zshrc amigável ao VS Code (code-server)
+# .zshrc amigável ao VS Code (code-server) e com Starship/oh-my-zsh
 RUN bash -lc 'cat > ~/.zshrc << "EOF"\n\
 # VS Code shell integration\n\
 if [ -n "$VSCODE_SHELL_INTEGRATION" ] && [ -r "$VSCODE_SHELL_INTEGRATION" ]; then . "$VSCODE_SHELL_INTEGRATION"; fi\n\
 \n\
-export PATH="$HOME/.local/bin:$PATH"\n\
+export PATH=\"$HOME/.local/bin:$PATH\"\n\
 # NVM\n\
-export NVM_DIR="$HOME/.nvm"\n\
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n\
+export NVM_DIR=\"$HOME/.nvm\"\n\
+[ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"\n\
 # oh-my-zsh\n\
-export ZSH="$HOME/.oh-my-zsh"\n\
-ZSH_THEME="robbyrussell"\n\
+export ZSH=\"$HOME/.oh-my-zsh\"\n\
+ZSH_THEME=\"robbyrussell\"\n\
 plugins=(git)\n\
-[ -d "$ZSH" ] && . "$ZSH/oh-my-zsh.sh"\n\
+[ -d \"$ZSH\" ] && . \"$ZSH/oh-my-zsh.sh\"\n\
 # starship\n\
-command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"\n\
-alias ll="ls -alF"\n\
+command -v starship >/dev/null 2>&1 && eval \"$(starship init zsh)\"\n\
+# qualidade de vida\n\
+alias ll=\"ls -alF\"\n\
 EOF'
 
 # .bashrc (caso use bash)
