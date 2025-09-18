@@ -1,2 +1,6 @@
 .env
 .vincent/
+
+# template-node/.gitignore
+*.tf.bak
+*-bkp.tf

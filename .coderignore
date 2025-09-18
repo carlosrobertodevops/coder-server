@@ -1,0 +1,5 @@
+# template-node/.coderignore
+main-bkp.tf
+*-bkp.tf
+*.tf.bak
+archive/
